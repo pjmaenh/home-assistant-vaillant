@@ -15,8 +15,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
 
 REQUIREMENTS = [
-    'https://github.com/samueldumont/netatmo-api-python/archive/'
-    'v1.4.1-vaillant.zip#pyatmo==1.4.1-vaillant']
+    'http://pjm.be/pyvaillant-1.4.1.1.zip#pyvaillant==1.4.1.1']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,11 +45,11 @@ CONFIG_SCHEMA = vol.Schema({
 
 
 def setup(hass, config):
-    import pyatmo
+    import pyvaillant
 
     global NETATMO_AUTH
     try:
-        NETATMO_AUTH = pyatmo.ClientAuth(
+        NETATMO_AUTH = pyvaillant.ClientAuth(
             config[DOMAIN][CONF_API_KEY], config[DOMAIN][CONF_SECRET_KEY],
             config[DOMAIN][CONF_USERNAME], config[DOMAIN][CONF_PASSWORD],
             'read_station read_camera access_camera '
