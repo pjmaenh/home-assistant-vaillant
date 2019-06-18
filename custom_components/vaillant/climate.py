@@ -43,7 +43,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     vaillant = hass.components.vaillant
     device = config.get(CONF_RELAY)
 
-    import pyatmo
+    import pyvaillant
     try:
         data = ThermostatData(vaillant.NETATMO_AUTH, device)
         for module_name in data.get_module_names():
@@ -52,7 +52,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
                    module_name not in config[CONF_THERMOSTAT]:
                     continue
             add_devices([VaillantThermostat(data, module_name)], True)
-    except pyatmo.NoDevice:
+    except pyvaillant.NoDevice:
         return None
 
 
@@ -168,8 +168,8 @@ class ThermostatData(object):
     @Throttle(MIN_TIME_BETWEEN_UPDATES)
     def update(self):
         """Call the Vaillant API to update the data."""
-        import pyatmo
-        self.thermostatdata = pyatmo.VaillantThermostatData(self.auth)
+        import pyvaillant
+        self.thermostatdata = pyvaillant.VaillantThermostatData(self.auth)
         self.target_temperature = self.thermostatdata.setpoint_temp
         self.setpoint_mode = self.thermostatdata.setpoint_mode
         self.current_temperature = self.thermostatdata.temp
