@@ -1,71 +1,75 @@
-"""
-Climate component for Vaillant vSmart and Bulex Migo Thermostats.
-"""
-import logging
+""" Support for Vaillant vSmart and Bulex Migo Thermostats."""
 from datetime import timedelta
+import logging
+from typing import Optional, List
+import time
 
+#import requests
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
-from homeassistant.components.climate import DOMAIN, ClimateDevice, PLATFORM_SCHEMA
+from homeassistant.components.climate import ClimateDevice, PLATFORM_SCHEMA
 from homeassistant.components.climate.const import (
-    STATE_HEAT, STATE_IDLE, 
-    SUPPORT_TARGET_TEMPERATURE, SUPPORT_OPERATION_MODE, 
-    SUPPORT_AWAY_MODE)
+    HVAC_MODE_AUTO, HVAC_MODE_HEAT, HVAC_MODE_OFF,
+    PRESET_AWAY,
+    CURRENT_HVAC_HEAT, CURRENT_HVAC_IDLE, CURRENT_HVAC_OFF,
+    SUPPORT_TARGET_TEMPERATURE, SUPPORT_PRESET_MODE,
+    DEFAULT_MIN_TEMP
+)
 from homeassistant.const import (
-     TEMP_CELSIUS, ATTR_TEMPERATURE)
+    TEMP_CELSIUS, ATTR_TEMPERATURE, PRECISION_HALVES, STATE_OFF,
+    ATTR_BATTERY_LEVEL
+)
 from homeassistant.util import Throttle
+
+from .const import DATA_VAILLANT_AUTH
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_RELAY = 'relay'
-CONF_THERMOSTAT = 'thermostat'
+PRESET_HWB = 'Hot Water Boost'
+#PRESET_FROSTGUARD = 'Frostguard'
+PRESET_SUMMER = 'Summer'
+PRESET_WINTER = 'Winter'
 
-DEFAULT_AWAY_TEMPERATURE = 14
-# # The default offeset is 2 hours (when you use the thermostat itself)
-DEFAULT_TIME_OFFSET = 7200
-# # Return cached results if last scan was less then this time ago
-# # NetAtmo Data is uploaded to server every hour
+SUPPORT_FLAGS = (SUPPORT_TARGET_TEMPERATURE | SUPPORT_PRESET_MODE)
+SUPPORT_HVAC = [HVAC_MODE_HEAT, HVAC_MODE_AUTO, HVAC_MODE_OFF]
+SUPPORT_PRESET = [PRESET_AWAY, PRESET_HWB, PRESET_SUMMER, PRESET_WINTER]
+
+#CONF_THERMOSTAT = 'thermostat'
+
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=300)
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Optional(CONF_RELAY): cv.string,
-    vol.Optional(CONF_THERMOSTAT, default=[]):
-        vol.All(cv.ensure_list, [cv.string]),
-})
-
-SUPPORT_FLAGS = (SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE |
-                 SUPPORT_AWAY_MODE)
-
-def setup_platform(hass, config, add_devices, discovery_info=None):
+def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Vaillant Thermostat."""
-    #vaillant = get_component('vaillant')
-    vaillant = hass.components.vaillant
-    device = config.get(CONF_RELAY)
-
     import pyvaillant
-    try:
-        data = ThermostatData(vaillant.NETATMO_AUTH, device)
-        for module_name in data.get_module_names():
-            if CONF_THERMOSTAT in config:
-                if config[CONF_THERMOSTAT] != [] and \
-                   module_name not in config[CONF_THERMOSTAT]:
-                    continue
-            add_devices([VaillantThermostat(data, module_name)], True)
-    except pyvaillant.NoDevice:
-        return None
+    auth = hass.data[DATA_VAILLANT_AUTH]
 
+    try:
+        data = ThermostatData(auth)
+    except pyvaillant.NoDevice:
+        return
+
+    data.update()
+    devices = []
+    devices.append(VaillantThermostat(data))
+    add_entities(devices, True)
+    
 
 class VaillantThermostat(ClimateDevice):
     """Representation a Vaillant thermostat."""
 
-    def __init__(self, data, module_name, away_temp=None):
+    def __init__(self, data):
         """Initialize the sensor."""
         self._data = data
-        self._state = None
-        self._name = module_name
+        self._previous_system_mode = None
+        #self._state = None
+        self._name = None
+        self._current_temperature = None
         self._target_temperature = None
-        self._away = None
+        self.update_without_throttle = False
+
+        # todo
+        #self._operation_list.append(HVAC_MODE_OFF)
 
     @property
     def supported_features(self):
@@ -74,8 +78,8 @@ class VaillantThermostat(ClimateDevice):
 
     @property
     def name(self):
-        """Return the name of the sensor."""
-        return self._name
+        """Return the name of the thermostat."""
+        return self._data.thermostatdata.name
 
     @property
     def temperature_unit(self):
@@ -85,91 +89,137 @@ class VaillantThermostat(ClimateDevice):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        return self._data.current_temperature
+        return self._data.thermostatdata.temp
 
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
-        return self._target_temperature
+        return self._data.thermostatdata.setpoint_temp
+
 
     @property
-    def current_operation(self):
-        """Return the current state of the thermostat."""
-        state = self._data.thermostatdata.relay_cmd
-        if state == 0:
-            return STATE_IDLE
-        elif state == 100:
-            return STATE_HEAT
+    def hvac_mode(self):
+        """
+        Return hvac operation ie. heat, cool mode.
+        Need to be one of HVAC_MODE_*.
+        """
+        if self._data.thermostatdata.system_mode == "frostguard":
+            return HVAC_MODE_OFF
+        elif 'manual' in self._data.thermostatdata.setpoint_modes:
+            return HVAC_MODE_HEAT
+        elif 'hwb' in self._data.thermostatdata.setpoint_modes:
+            return HVAC_MODE_HEAT
+        return HVAC_MODE_AUTO
+        
 
     @property
-    def is_away_mode_on(self):
-        """Return true if away mode is on."""
-        return self._away
+    def hvac_modes(self):
+        """Return the list of available hvac operation modes."""
+        return SUPPORT_HVAC
 
-    def turn_away_mode_on(self):
-        """Turn away on."""
-        mode = "away"
-        temp = None
-        self._data.thermostatdata.setthermpoint(mode, temp, endTimeOffset=None)
-        self._away = True
+    @property
+    def hvac_action(self) -> Optional[str]:
+        """
+        Return the current running hvac operation if supported.
+        Need to be one of CURRENT_HVAC_*.
+        """
+        if self._data.thermostatdata.system_mode == "frostguard":
+            return CURRENT_HVAC_OFF
 
-    def turn_away_mode_off(self):
-        """Turn away off."""
-        mode = "program"
-        temp = None
-        self._data.thermostatdata.setthermpoint(mode, temp, endTimeOffset=None)
-        self._away = False
+        if self.current_temperature < self.target_temperature:
+            return CURRENT_HVAC_HEAT
+        return CURRENT_HVAC_IDLE
+
+    def set_hvac_mode(self, hvac_mode: str) -> None:
+        """Set new target hvac mode."""
+        #ToDo !
+        if hvac_mode == HVAC_MODE_OFF:
+            prev = self._data.thermostatdata.system_mode
+            if (prev != "frostguard"):
+                self._previous_system_mode = prev
+            self._data.thermostatdata.setSystemMode("frostguard")
+        elif hvac_mode == HVAC_MODE_HEAT:
+            self._data.thermostatdata.activate("hwb", None, 3600)
+        elif hvac_mode == HVAC_MODE_AUTO:
+            if self._previous_system_mode:
+                self._data.thermostatdata.setSystemMode(self._previous_system_mode)
+            self._data.thermostatdata.reset()
+
+        self.update_without_throttle = True
+        self.schedule_update_ha_state(True)
+
+    def set_preset_mode(self, preset_mode: str) -> None:
+        """Set new preset mode."""
+        #ToDo !
+        if preset_mode == PRESET_AWAY:
+            self._data.thermostatdata.activate("away", None)
+
+        elif preset_mode == PRESET_HWB:
+            self._data.thermostatdata.activate("hwb", None, 3600)
+
+        elif preset_mode == PRESET_SUMMER:
+            if(self._data.thermostatdata.system_mode != "summer"):
+                self._data.thermostatdata.setSystemMode("summer")
+            self._data.thermostatdata.reset()
+
+        elif preset_mode == PRESET_WINTER:
+            if(self._data.thermostatdata.system_mode != "winter"):
+                self._data.thermostatdata.setSystemMode("winter")
+            self._data.thermostatdata.reset()
+        else:
+            _LOGGER.error("Preset mode '%s' not available", preset_mode)
+
+        self.update_without_throttle = True
+        self.schedule_update_ha_state(True)
+
+    @property
+    def preset_mode(self) -> Optional[str]:
+        """Return the current preset mode, e.g., home, away, temp."""
+        if 'away' in self._data.thermostatdata.setpoint_modes:
+            return PRESET_AWAY
+        elif 'hwb' in self._data.thermostatdata.setpoint_modes:
+            return PRESET_HWB
+        elif 'manual' in self._data.thermostatdata.setpoint_modes:
+            return 'Manual'
+        elif self._data.thermostatdata.system_mode == "summer":
+            return PRESET_SUMMER
+        elif self._data.thermostatdata.system_mode == "winter":
+            return PRESET_WINTER
+
+    @property
+    def preset_modes(self) -> Optional[List[str]]:
+        """Return a list of available preset modes."""
+        return SUPPORT_PRESET
 
     def set_temperature(self, **kwargs):
         """Set new target temperature for 2 hours."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        mode = "manual"
-        self._data.thermostatdata.setthermpoint(
-            mode, temperature, DEFAULT_TIME_OFFSET)
-        self._target_temperature = temperature
-        self._away = False
 
-    @Throttle(MIN_TIME_BETWEEN_UPDATES)
+        self._data.thermostatdata.activate("manual", temperature)
+        
     def update(self):
         """Get the latest data from Vaillant API and updates the states."""
-        self._data.update()
-        self._target_temperature = self._data.thermostatdata.setpoint_temp
-        self._away = self._data.setpoint_mode == 'away'
+
+        if self.update_without_throttle:
+            self._data.update(no_throttle=True)
+            self.update_without_throttle = False
+        else:
+            self._data.update()
 
 
-class ThermostatData(object):
+class ThermostatData:
     """Get the latest data from Vaillant."""
 
-    def __init__(self, auth, device=None, is_vaillant=False):
+    def __init__(self, auth):
         """Initialize the data object."""
         self.auth = auth
         self.thermostatdata = None
-        self.module_names = []
-        self.device = device
-        self.current_temperature = None
-        self.target_temperature = None
-        self.setpoint_mode = None
-        self.is_vaillant = is_vaillant
-
-    def get_module_names(self):
-        """Return all module available on the API as a list."""
-        self.update()
-        if not self.device:
-            for device in self.thermostatdata.modules:
-                for module in self.thermostatdata.modules[device].values():
-                    self.module_names.append(module['module_name'])
-        else:
-            for module in self.thermostatdata.modules[self.device].values():
-                self.module_names.append(module['module_name'])
-        return self.module_names
 
     @Throttle(MIN_TIME_BETWEEN_UPDATES)
     def update(self):
         """Call the Vaillant API to update the data."""
         import pyvaillant
         self.thermostatdata = pyvaillant.VaillantThermostatData(self.auth)
-        self.target_temperature = self.thermostatdata.setpoint_temp
-        self.setpoint_mode = self.thermostatdata.setpoint_mode
-        self.current_temperature = self.thermostatdata.temp
+

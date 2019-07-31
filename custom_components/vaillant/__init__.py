@@ -14,8 +14,11 @@ from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
 
+from .const import DATA_VAILLANT_AUTH
+
 REQUIREMENTS = [
-    'http://pjm.be/pyvaillant-1.4.1.1.zip#pyvaillant==1.4.1.1']
+    'https://github.com/pjmaenh/pyvaillant/archive/'
+    'v0.0.4.zip#pyvaillant==0.0.4']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,7 +28,6 @@ CONF_APP_VERSION = 'app_version'
 
 DOMAIN = 'vaillant'
 
-NETATMO_AUTH = None
 DEFAULT_DISCOVERY = True
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=10)
@@ -47,9 +49,9 @@ CONFIG_SCHEMA = vol.Schema({
 def setup(hass, config):
     import pyvaillant
 
-    global NETATMO_AUTH
+
     try:
-        NETATMO_AUTH = pyvaillant.ClientAuth(
+        auth = pyvaillant.ClientAuth(
             config[DOMAIN][CONF_API_KEY], config[DOMAIN][CONF_SECRET_KEY],
             config[DOMAIN][CONF_USERNAME], config[DOMAIN][CONF_PASSWORD],
             'read_station read_camera access_camera '
@@ -60,6 +62,9 @@ def setup(hass, config):
     except HTTPError:
         _LOGGER.error("Unable to connect to Vaillant API")
         return False
+
+    # Store config to be used during entry setup
+    hass.data[DATA_VAILLANT_AUTH] = auth
 
     if config[DOMAIN][CONF_DISCOVERY]:
         discovery.load_platform(hass, 'climate', DOMAIN, {}, config)
