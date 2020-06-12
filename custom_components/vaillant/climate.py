@@ -8,7 +8,7 @@ import time
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
-from homeassistant.components.climate import ClimateDevice, PLATFORM_SCHEMA
+from homeassistant.components.climate import ClimateEntity, PLATFORM_SCHEMA
 from homeassistant.components.climate.const import (
     HVAC_MODE_AUTO, HVAC_MODE_HEAT, HVAC_MODE_OFF,
     PRESET_AWAY,
@@ -55,7 +55,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     add_entities(devices, True)
     
 
-class VaillantThermostat(ClimateDevice):
+class VaillantThermostat(ClimateEntity):
     """Representation a Vaillant thermostat."""
 
     def __init__(self, data):
