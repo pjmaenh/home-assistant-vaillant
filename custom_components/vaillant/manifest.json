@@ -1,0 +1,11 @@
+{
+    "domain": "vaillant",
+    "name": "vaillant",
+    "documentation": "https://github.com/pjmaenh/home-assistant-vaillant",
+    "version": "1.0.0",
+    "issue_tracker": "https://github.com/pjmaenh/home-assistant-vaillant/issues",
+    "requirements": [
+    ],
+    "dependencies": [],
+    "codeowners": ["pjmaenh"]
+}
