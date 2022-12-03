@@ -1,5 +1,11 @@
 # home-assistant-vaillant
- 
+
+| :warning: WARNING          |
+|:---------------------------|
+| This custom component is **not maintained anymore**. However, [@MislavMandaric](https://github.com/MislavMandaric) has completely rewritten the component, and his version can be found at https://github.com/MislavMandaric/home-assistant-vaillant-vsmart.      |
+
+
+
 **Home Assistant component for integrating Vaillant vSMART and Bulex/Saunier Duval MiGo**
 
 This component allows you to control a Vaillant vSMART of Bulex/Saunier Duval MiGo through Home Assistant.
